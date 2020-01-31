@@ -48,6 +48,13 @@ object Ledger {
     txNodeIdToScenarioNodeId(commitPrefix, cid.txnid.index)
 
   @inline
+  def relativeToContractIdString(
+      commitPrefix: LedgerString,
+      cid: RelativeContractId,
+  ): ContractIdString =
+    ContractIdString.concat(commitPrefix, LedgerString.fromInt(cid.txnid.index))
+
+  @inline
   private def contractIdToAbsoluteContractId(
       commitPrefix: LedgerString,
       cid: ContractId,
@@ -69,8 +76,13 @@ object Ledger {
   }
 
   @inline
-  def assertNoContractId(cid: ContractId): Nothing =
-    crash(s"Not expecting to find a contract id here, but found '$cid'")
+  def assertNoContractId(key: VersionedValue[Value.ContractId]): VersionedValue[Nothing] =
+    VersionedValue
+      .assertNoCid(key)
+      .fold(
+        cid => crash(s"Not expecting to find a contract id here, but found '$cid'"),
+        identity,
+      )
 
   private val `:` = LedgerString.assertFromString(":")
   private val `#` = LedgerString.assertFromString("#")
@@ -197,15 +209,17 @@ object Ledger {
     * prefix.
     */
   private def translateNode(commitPrefix: LedgerString, node: Transaction.Node): Node = {
+    def makeAbs(cid: Value.RelativeContractId) = relativeToContractIdString(commitPrefix, cid)
+    import VersionedValue._
     node match {
       case nc: NodeCreate.WithTxValue[ContractId] =>
         NodeCreate[AbsoluteContractId, Transaction.Value[AbsoluteContractId]](
           coid = contractIdToAbsoluteContractId(commitPrefix, nc.coid),
-          coinst = nc.coinst.copy(arg = makeAbsolute(commitPrefix, nc.coinst.arg)),
+          coinst = ContractInst.resolveRelCid(makeAbs, nc.coinst),
           optLocation = nc.optLocation,
           signatories = nc.signatories,
           stakeholders = nc.stakeholders,
-          key = nc.key.map(_.mapValue(makeAbsolute(commitPrefix, _))),
+          key = nc.key.map(KeyWithMaintainers.resolveRelCid(makeAbs, _)),
         )
       case nf: NodeFetch[ContractId] =>
         NodeFetch[AbsoluteContractId](
@@ -229,14 +243,14 @@ object Ledger {
           signatories = nex.signatories,
           controllers = nex.controllers,
           children = nex.children.map(ScenarioNodeId(commitPrefix, _)),
-          exerciseResult = nex.exerciseResult.map(makeAbsolute(commitPrefix, _)),
-          key = nex.key.map(_.mapValue(_.mapContractId(assertNoContractId))),
+          exerciseResult = nex.exerciseResult.map(VersionedValue.resolveRelCid(makeAbs, _)),
+          key = nex.key.map(KeyWithMaintainers.resolveRelCid(makeAbs, _)),
         )
       case nlbk: NodeLookupByKey.WithTxValue[ContractId] =>
         NodeLookupByKey(
           templateId = nlbk.templateId,
           optLocation = nlbk.optLocation,
-          key = nlbk.key.mapValue(makeAbsolute(commitPrefix, _)),
+          key = KeyWithMaintainers.resolveRelCid(makeAbs, nlbk.key),
           result = nlbk.result.map(contractIdToAbsoluteContractId(commitPrefix, _)),
         )
     }
@@ -1179,7 +1193,8 @@ object Ledger {
                         case Some(keyWithMaintainers) =>
                           val gk = GlobalKey(
                             nc.coinst.template,
-                            keyWithMaintainers.key.mapContractId(assertNoContractId),
+                            // FIXME: we probably should never crash here !
+                            assertNoContractId(keyWithMaintainers.key),
                           )
                           newCache1.activeKeys.get(gk) match {
                             case None => Right(newCache1.addKey(gk, nc.coid))
@@ -1216,9 +1231,13 @@ object Ledger {
                               ]]]
                           nc.key match {
                             case None => newCache0_1
-                            case Some(key) =>
+                            case Some(keyWithMaintainers) =>
                               newCache0_1.removeKey(
-                                GlobalKey(ex.templateId, key.key.mapContractId(assertNoContractId)),
+                                GlobalKey(
+                                  ex.templateId,
+                                  // FIXME: we probably should'nt crash here !
+                                  assertNoContractId(keyWithMaintainers.key),
+                                ),
                               )
                           }
                         } else newCache0

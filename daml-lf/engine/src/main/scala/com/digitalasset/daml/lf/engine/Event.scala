@@ -51,6 +51,7 @@ final case class CreateEvent[Cid, Val](
     */
   val stakeholders = signatories.union(observers).intersect(witnesses)
 
+  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
   override def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): CreateEvent[Cid2, Val2] =
     copy(
       contractId = f(contractId),

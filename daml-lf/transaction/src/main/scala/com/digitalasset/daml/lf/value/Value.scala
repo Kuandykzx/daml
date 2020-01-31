@@ -4,7 +4,13 @@
 package com.digitalasset.daml.lf
 package value
 
-import com.digitalasset.daml.lf.data.Ref.{ContractIdString, Identifier, LedgerString, Name}
+import com.digitalasset.daml.lf.data.Ref.{
+  ContractIdString,
+  Identifier,
+  LedgerString,
+  Name,
+  `Name equal instance`
+}
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.LanguageVersion
 
@@ -17,29 +23,18 @@ import scalaz.syntax.equal._
 /** Values   */
 sealed abstract class Value[+Cid] extends Product with Serializable {
   import Value._
+
   // TODO (FM) make this tail recursive
+  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
   def mapContractId[Cid2](f: Cid => Cid2): Value[Cid2] =
-    // TODO (FM) make this tail recursive
-    this match {
-      case ValueContractId(coid) => ValueContractId(f(coid))
-      case ValueRecord(id, fs) =>
-        ValueRecord(id, fs.map({
-          case (lbl, value) => (lbl, value.mapContractId(f))
-        }))
-      case ValueStruct(fs) =>
-        ValueStruct(fs.map[(Name, Value[Cid2])] {
-          case (lbl, value) => (lbl, value.mapContractId(f))
-        })
-      case ValueVariant(id, variant, value) =>
-        ValueVariant(id, variant, value.mapContractId(f))
-      case x: ValueCidlessLeaf => x
-      case ValueList(vs) =>
-        ValueList(vs.map(_.mapContractId(f)))
-      case ValueOptional(x) => ValueOptional(x.map(_.mapContractId(f)))
-      case ValueTextMap(x) => ValueTextMap(x.mapValue(_.mapContractId(f)))
-      case ValueGenMap(entries) =>
-        ValueGenMap(entries.map { case (k, v) => k.mapContractId(f) -> v.mapContractId(f) })
-    }
+    map1(f)
+
+  private[lf] def map1[Cid2](f: Cid => Cid2): Value[Cid2] =
+    Value.map1(f)(this)
+
+  //  def resolveRelCid[Cid2](f: RelativeContractId => Ref.ContractIdString)(
+//      implicit resolver1: CidResolver[Cid, Cid2]): Value[Cid2] =
+//    Value.resolveRelCid(f)(resolver1)(this)
 
   /** returns a list of validation errors: if the result is non-empty the value is
     * _not_ serializable.
@@ -143,9 +138,38 @@ sealed abstract class Value[+Cid] extends Product with Serializable {
 
     go(false, BackStack.empty, FrontStack((this, 0))).toImmArray
   }
+
 }
 
-object Value {
+object Value extends CidResolver1[Value] {
+
+  // TODO (FM) make this tail recursive
+  private[lf] override def map1[Cid, Cid2](f: Cid => Cid2): Value[Cid] => Value[Cid2] = {
+    def go(v0: Value[Cid]): Value[Cid2] =
+      // TODO (FM) make this tail recursive
+      v0 match {
+        case ValueContractId(coid) => ValueContractId(f(coid))
+        case ValueRecord(id, fs) =>
+          ValueRecord(id, fs.map({
+            case (lbl, value) => (lbl, go(value))
+          }))
+        case ValueStruct(fs) =>
+          ValueStruct(fs.map[(Name, Value[Cid2])] {
+            case (lbl, value) => (lbl, go(value))
+          })
+        case ValueVariant(id, variant, value) =>
+          ValueVariant(id, variant, go(value))
+        case x: ValueCidlessLeaf => x
+        case ValueList(vs) =>
+          ValueList(vs.map(go))
+        case ValueOptional(x) => ValueOptional(x.map(go))
+        case ValueTextMap(x) => ValueTextMap(x.mapValue(go))
+        case ValueGenMap(entries) =>
+          ValueGenMap(entries.map { case (k, v) => go(k) -> go(v) })
+      }
+
+    go
+  }
 
   /** the maximum nesting level for DAML-LF serializable values. we put this
     * limitation to be able to reliably implement stack safe programs with it.
@@ -158,8 +182,13 @@ object Value {
   val MAXIMUM_NESTING: Int = 100
 
   final case class VersionedValue[+Cid](version: ValueVersion, value: Value[Cid]) {
+
+    @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
     def mapContractId[Cid2](f: Cid => Cid2): VersionedValue[Cid2] =
-      this.copy(value = value.mapContractId(f))
+      map1(f)
+
+    private[lf] def map1[Cid2](f: Cid => Cid2): VersionedValue[Cid2] =
+      VersionedValue.map1(f)(this)
 
     /** Increase the `version` if appropriate for `languageVersions`. */
     def typedBy(languageVersions: LanguageVersion*): VersionedValue[Cid] = {
@@ -169,15 +198,17 @@ object Value {
     }
   }
 
-  import Name.equalInstance
-
-  object VersionedValue {
+  object VersionedValue extends CidResolver1[VersionedValue] {
     implicit def `VersionedValue Equal instance`[Cid: Equal]: Equal[VersionedValue[Cid]] =
       ScalazEqual.withNatural(Equal[Cid].equalIsNatural) { (a, b) =>
         import a._
         val VersionedValue(bVersion, bValue) = b
         version == bVersion && value === bValue
       }
+
+    override private[lf] def map1[A, B](f: A => B): VersionedValue[A] => VersionedValue[B] =
+      x => x.copy(value = Value.map1(f)(x.value))
+
   }
 
   /** The parent of all [[Value]] cases that cannot possibly have a Cid.
@@ -190,8 +221,10 @@ object Value {
       tycon: Option[Identifier],
       fields: ImmArray[(Option[Name], Value[Cid])],
   ) extends Value[Cid]
+
   final case class ValueVariant[+Cid](tycon: Option[Identifier], variant: Name, value: Value[Cid])
       extends Value[Cid]
+
   final case class ValueEnum(tycon: Option[Identifier], value: Name) extends ValueCidlessLeaf
 
   final case class ValueContractId[+Cid](value: Cid) extends Value[Cid]
@@ -201,24 +234,38 @@ object Value {
     * packages and FrontQueue lets prepend chunks rather than only one element.
     */
   final case class ValueList[+Cid](values: FrontStack[Value[Cid]]) extends Value[Cid]
+
   final case class ValueInt64(value: Long) extends ValueCidlessLeaf
+
   final case class ValueNumeric(value: Numeric) extends ValueCidlessLeaf
+
   // Note that Text are assume to be UTF8
   final case class ValueText(value: String) extends ValueCidlessLeaf
+
   final case class ValueTimestamp(value: Time.Timestamp) extends ValueCidlessLeaf
+
   final case class ValueDate(value: Time.Date) extends ValueCidlessLeaf
+
   final case class ValueParty(value: Ref.Party) extends ValueCidlessLeaf
+
   final case class ValueBool(value: Boolean) extends ValueCidlessLeaf
+
   object ValueBool {
     val True = new ValueBool(true)
     val Fasle = new ValueBool(false)
+
     def apply(value: Boolean): ValueBool =
       if (value) ValueTrue else ValueFalse
   }
+
   case object ValueUnit extends ValueCidlessLeaf
+
   final case class ValueOptional[+Cid](value: Option[Value[Cid]]) extends Value[Cid]
+
   final case class ValueTextMap[+Cid](value: SortedLookupList[Value[Cid]]) extends Value[Cid]
+
   final case class ValueGenMap[+Cid](entries: ImmArray[(Value[Cid], Value[Cid])]) extends Value[Cid]
+
   // this is present here just because we need it in some internal code --
   // specifically the scenario interpreter converts committed values to values and
   // currently those can be structs, although we should probably ban that.
@@ -229,7 +276,9 @@ object Value {
     ScalazEqual.withNatural(Equal[Cid].equalIsNatural) {
       ScalazEqual.match2(fallback = false) {
         case a @ (_: ValueInt64 | _: ValueNumeric | _: ValueText | _: ValueTimestamp |
-            _: ValueParty | _: ValueBool | _: ValueDate | ValueUnit) => { case b => a == b }
+            _: ValueParty | _: ValueBool | _: ValueDate | ValueUnit) => {
+          case b => a == b
+        }
         case r: ValueRecord[Cid] => {
           case ValueRecord(tycon2, fields2) =>
             import r._
@@ -274,17 +323,21 @@ object Value {
 
   /** A contract instance is a value plus the template that originated it. */
   final case class ContractInst[+Val](template: Identifier, arg: Val, agreementText: String) {
+    @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
     def mapValue[Val2](f: Val => Val2): ContractInst[Val2] =
       this.copy(arg = f(arg))
   }
 
-  object ContractInst {
+  object ContractInst extends CidResolver1[ContractInst] {
     implicit def equalInstance[Val: Equal]: Equal[ContractInst[Val]] =
       ScalazEqual.withNatural(Equal[Val].equalIsNatural) { (a, b) =>
         import a._
         val ContractInst(bTemplate, bArg, bAgreementText) = b
         template == bTemplate && arg === bArg && agreementText == bAgreementText
       }
+
+    override private[lf] def map1[A, B](f: A => B): ContractInst[A] => ContractInst[B] =
+      x => x.copy(arg = f(x.arg))
   }
 
   type NodeIdx = Int
@@ -305,12 +358,24 @@ object Value {
     * automatically upcast to ContractId by subtyping.
     */
   sealed trait ContractId extends Product with Serializable
+
   final case class AbsoluteContractId(coid: ContractIdString) extends ContractId
+
   final case class RelativeContractId(txnid: NodeId, discriminator: Option[crypto.Hash] = None)
       extends ContractId
 
   object ContractId {
     implicit val equalInstance: Equal[ContractId] = Equal.equalA
+
+    implicit val noCidResolverInstance: CidResolver.NoCidResolver[ContractId, Nothing] =
+      CidResolver.AtomicNoCidResolver
+
+    implicit val relCidResolverInstance
+      : CidResolver.RelCidResolver[ContractId, AbsoluteContractId] =
+      CidResolver.AtomicRelCidResolver
+
+    implicit val noRelCidResolver: CidResolver.NoRelCidResolver[ContractId, AbsoluteContractId] =
+      CidResolver.AtomicNoRelCidResolver
   }
 
   /** The constructor is private so that we make sure that only this object constructs
@@ -331,7 +396,7 @@ object Value {
 
   }
 
-  /*** Keys cannot contain contract ids */
+  /** * Keys cannot contain contract ids */
   type Key = Value[Nothing]
 
   val ValueTrue: ValueBool = ValueBool.True

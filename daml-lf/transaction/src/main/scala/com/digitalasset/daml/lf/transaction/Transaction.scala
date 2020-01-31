@@ -8,7 +8,8 @@ import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Node._
-import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.CidResolver.RelCidResolver
+import com.digitalasset.daml.lf.value.{CidResolver3, Value}
 import com.digitalasset.daml.lf.value.Value._
 import scalaz.Equal
 
@@ -22,6 +23,7 @@ case class VersionedTransaction[Nid, Cid](
     transaction: GenTransaction.WithTxValue[Nid, Cid],
 ) {
 
+  @deprecated("use TransactionVersion.makeRelCidAbs", since = "0.12.51")
   def mapContractId[Cid2](f: Cid => Cid2): VersionedTransaction[Nid, Cid2] =
     copy(transaction = transaction.mapContractIdAndValue(f, _.mapContractId(f)))
 
@@ -87,26 +89,37 @@ case class GenTransaction[Nid, Cid, +Val](
 
   import GenTransaction._
 
+  private[lf] def map3[Nid2, Cid2, Val2](
+      f: Nid => Nid2,
+      g: Cid => Cid2,
+      h: Val => Val2
+  ): GenTransaction[Nid2, Cid2, Val2] =
+    GenTransaction.map3(f, g, h)(this)
+
+  def resolveRelCid[Nid2, Cid2, Val2](f: Value.RelativeContractId => Ref.ContractIdString)(
+      implicit resolver1: RelCidResolver[Nid, Nid2],
+      resolver2: RelCidResolver[Cid, Cid2],
+      resolve3: RelCidResolver[Val, Val2]
+  ): GenTransaction[Nid2, Cid2, Val2] =
+    GenTransaction.resolveRelCid(f, this)
+
+  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
   def mapContractIdAndValue[Cid2, Val2](
       f: Cid => Cid2,
       g: Val => Val2,
   ): GenTransaction[Nid, Cid2, Val2] =
-    copy(
-      nodes = // do NOT use `Map#mapValues`! it applies the function lazily on lookup. see #1861
-        nodes.transform((_, value) => value.mapContractIdAndValue(f, g)),
-    )
+    map3(identity, f, g)
 
+  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
   def mapContractId[Cid2](f: Cid => Cid2)(
       implicit ev: Val <:< VersionedValue[Cid],
   ): WithTxValue[Nid, Cid2] =
     mapContractIdAndValue(f, _.mapContractId(f))
 
   /** Note: the provided function must be injective, otherwise the transaction will be corrupted. */
+  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
   def mapNodeId[Nid2](f: Nid => Nid2): GenTransaction[Nid2, Cid, Val] =
-    copy(
-      roots = roots.map(f),
-      nodes = nodes.map { case (nid, node) => (f(nid), node.mapNodeId(f)) },
-    )
+    map3(f, identity, identity)
 
   /**
     * This function traverses the transaction tree in pre-order traversal (i.e. exercise node are traversed before their children).
@@ -330,7 +343,7 @@ case class GenTransaction[Nid, Cid, +Val](
     }
 }
 
-object GenTransaction {
+object GenTransaction extends CidResolver3[GenTransaction] {
   type WithTxValue[Nid, Cid] = GenTransaction[Nid, Cid, Transaction.Value[Cid]]
 
   case class NotWellFormedError[Nid](nid: Nid, reason: NotWellFormedErrorReason)
@@ -338,6 +351,22 @@ object GenTransaction {
   case object DanglingNodeId extends NotWellFormedErrorReason
   case object OrphanedNode extends NotWellFormedErrorReason
   case object AliasedNode extends NotWellFormedErrorReason
+
+  override private[lf] def map3[A1, A2, A3, B1, B2, B3](
+      f1: A1 => B1,
+      f2: A2 => B2,
+      f3: A3 => B3): GenTransaction[A1, A2, A3] => GenTransaction[B1, B2, B3] = {
+    case GenTransaction(nodes, roots, optUsedPackages, transactionSeed) =>
+      GenTransaction(
+        nodes = nodes.map {
+          case (nodeId, node) =>
+            f1(nodeId) -> GenNode.map3(f1, f2, f3)(node)
+        },
+        roots = roots.map(f1),
+        optUsedPackages,
+        transactionSeed,
+      )
+  }
 }
 
 object Transaction {
