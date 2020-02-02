@@ -7,7 +7,7 @@ import com.codahale.metrics
 import com.codahale.metrics.{Counter, Timer}
 import com.daml.ledger.participant.state.kvutils.Conversions.{buildTimestamp, commandDedupKey, _}
 import com.daml.ledger.participant.state.kvutils.DamlKvutils._
-import com.daml.ledger.participant.state.kvutils.{Conversions, Err, InputsAndEffects, DamlStateMap}
+import com.daml.ledger.participant.state.kvutils.{Conversions, DamlStateMap, Err, InputsAndEffects}
 import com.daml.ledger.participant.state.v1.{Configuration, ParticipantId, RejectionReason}
 import com.digitalasset.daml.lf.archive.Decode
 import com.digitalasset.daml.lf.archive.Reader.ParseError
@@ -16,7 +16,13 @@ import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.engine.{Blinding, Engine}
 import com.digitalasset.daml.lf.transaction.Node.{GlobalKey, NodeCreate, NodeExercises}
 import com.digitalasset.daml.lf.transaction.BlindingInfo
-import com.digitalasset.daml.lf.value.Value.{AbsoluteContractId, ContractId, NodeId, VersionedValue}
+import com.digitalasset.daml.lf.value.Value.{
+  AbsoluteContractId,
+  ContractId,
+  ContractInst,
+  NodeId,
+  VersionedValue
+}
 import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
@@ -231,7 +237,7 @@ private[kvutils] case class ProcessTransactionSubmission(
             blindingInfo.localDisclosure(NodeId(key.getContractId.getNodeId.toInt))
           cs.addAllLocallyDisclosedTo((localDisclosure: Iterable[String]).asJava)
           val absCoInst =
-            createNode.coinst.mapValue(_.mapContractId(Conversions.toAbsCoid(entryId, _)))
+            ContractInst.resolveRelCid(Conversions.toAbsCoid(entryId, _), createNode.coinst)
           cs.setContractInstance(
             Conversions.encodeContractInstance(absCoInst)
           )

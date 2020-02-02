@@ -26,7 +26,8 @@ private case class SRunnerException(err: SError) extends RuntimeException(err.to
   */
 final case class ScenarioRunner(
     machine: Speedy.Machine,
-    partyNameMangler: (String => String) = identity) {
+    partyNameMangler: (String => String) = identity
+) {
   var ledger: Ledger = Ledger.initialLedger(Time.Timestamp.Epoch)
 
   import scala.util.{Try, Success, Failure}
@@ -115,7 +116,8 @@ final case class ScenarioRunner(
           effectiveAt = ledger.currentTime,
           optLocation = machine.commitLocation,
           tr = tx,
-          l = ledger)
+          l = ledger,
+        )
         .isRight) {
       throw SRunnerException(ScenarioErrorMustFailSucceeded(tx))
     }
@@ -135,7 +137,7 @@ final case class ScenarioRunner(
       effectiveAt = ledger.currentTime,
       optLocation = machine.commitLocation,
       tr = tx,
-      l = ledger
+      l = ledger,
     ) match {
       case Left(fas) =>
         throw SRunnerException(ScenarioErrorCommitError(fas))

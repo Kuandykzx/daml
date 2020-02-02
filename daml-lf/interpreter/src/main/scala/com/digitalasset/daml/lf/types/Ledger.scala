@@ -1,7 +1,8 @@
 // Copyright (c) 2020 The DAML Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.daml.lf.types
+package com.digitalasset.daml.lf
+package types
 
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.{ImmArray, Time}
@@ -51,8 +52,8 @@ object Ledger {
   def relativeToContractIdString(
       commitPrefix: LedgerString,
       cid: RelativeContractId,
-  ): ContractIdString =
-    ContractIdString.concat(commitPrefix, LedgerString.fromInt(cid.txnid.index))
+  ): LedgerString =
+    LedgerString.assertConcat(commitPrefix, LedgerString.fromInt(cid.txnid.index))
 
   @inline
   private def contractIdToAbsoluteContractId(
@@ -77,12 +78,10 @@ object Ledger {
 
   @inline
   def assertNoContractId(key: VersionedValue[Value.ContractId]): VersionedValue[Nothing] =
-    VersionedValue
-      .assertNoCid(key)
-      .fold(
-        cid => crash(s"Not expecting to find a contract id here, but found '$cid'"),
-        identity,
-      )
+    key.assertNoCid.fold(
+      cid => crash(s"Not expecting to find a contract id here, but found '$cid'"),
+      identity,
+    )
 
   private val `:` = LedgerString.assertFromString(":")
   private val `#` = LedgerString.assertFromString("#")
@@ -182,78 +181,29 @@ object Ledger {
       committer: Party,
       effectiveAt: Time.Timestamp,
       enrichedTx: EnrichedTransaction,
-  ): RichTransaction = RichTransaction(
-    committer = committer,
-    effectiveAt = effectiveAt,
-    roots = enrichedTx.roots.map(ScenarioNodeId(commitPrefix, _)),
-    nodes = enrichedTx.nodes.map {
-      case (nodeId, node) =>
-        (ScenarioNodeId(commitPrefix, nodeId), translateNode(commitPrefix, node))
-    }(breakOut),
-    explicitDisclosure = enrichedTx.explicitDisclosure.map {
-      case (nodeId, ps) =>
-        (ScenarioNodeId(commitPrefix, nodeId), ps)
-    },
-    localImplicitDisclosure = enrichedTx.localImplicitDisclosure.map {
-      case (nodeId, ps) =>
-        (ScenarioNodeId(commitPrefix, nodeId), ps)
-    },
-    globalImplicitDisclosure = enrichedTx.globalImplicitDisclosure,
-    failedAuthorizations = enrichedTx.failedAuthorizations,
-  )
-
-  /**
-    * Translate a node of the update interpreter transaction to a node of the sandbox ledger
-    * transaction. The update interpreter transaction contains relative node id's and absolute contract
-    * id's. Both are translated to sandbox ledger node id's (tagged strings) with help of the commit
-    * prefix.
-    */
-  private def translateNode(commitPrefix: LedgerString, node: Transaction.Node): Node = {
+  ): RichTransaction = {
     def makeAbs(cid: Value.RelativeContractId) = relativeToContractIdString(commitPrefix, cid)
-    import VersionedValue._
-    node match {
-      case nc: NodeCreate.WithTxValue[ContractId] =>
-        NodeCreate[AbsoluteContractId, Transaction.Value[AbsoluteContractId]](
-          coid = contractIdToAbsoluteContractId(commitPrefix, nc.coid),
-          coinst = ContractInst.resolveRelCid(makeAbs, nc.coinst),
-          optLocation = nc.optLocation,
-          signatories = nc.signatories,
-          stakeholders = nc.stakeholders,
-          key = nc.key.map(KeyWithMaintainers.resolveRelCid(makeAbs, _)),
-        )
-      case nf: NodeFetch[ContractId] =>
-        NodeFetch[AbsoluteContractId](
-          coid = contractIdToAbsoluteContractId(commitPrefix, nf.coid),
-          optLocation = nf.optLocation,
-          templateId = nf.templateId,
-          actingParties = nf.actingParties,
-          signatories = nf.signatories,
-          stakeholders = nf.stakeholders,
-        )
-      case nex: NodeExercises.WithTxValue[Transaction.NodeId, ContractId] =>
-        NodeExercises[ScenarioNodeId, AbsoluteContractId, Transaction.Value[AbsoluteContractId]](
-          targetCoid = contractIdToAbsoluteContractId(commitPrefix, nex.targetCoid),
-          templateId = nex.templateId,
-          choiceId = nex.choiceId,
-          optLocation = nex.optLocation,
-          consuming = nex.consuming,
-          actingParties = nex.actingParties,
-          chosenValue = makeAbsolute(commitPrefix, nex.chosenValue),
-          stakeholders = nex.stakeholders,
-          signatories = nex.signatories,
-          controllers = nex.controllers,
-          children = nex.children.map(ScenarioNodeId(commitPrefix, _)),
-          exerciseResult = nex.exerciseResult.map(VersionedValue.resolveRelCid(makeAbs, _)),
-          key = nex.key.map(KeyWithMaintainers.resolveRelCid(makeAbs, _)),
-        )
-      case nlbk: NodeLookupByKey.WithTxValue[ContractId] =>
-        NodeLookupByKey(
-          templateId = nlbk.templateId,
-          optLocation = nlbk.optLocation,
-          key = KeyWithMaintainers.resolveRelCid(makeAbs, nlbk.key),
-          result = nlbk.result.map(contractIdToAbsoluteContractId(commitPrefix, _)),
-        )
-    }
+    RichTransaction(
+      committer = committer,
+      effectiveAt = effectiveAt,
+      roots = enrichedTx.roots.map(ScenarioNodeId(commitPrefix, _)),
+      nodes = enrichedTx.nodes.map {
+        case (nodeId, node) =>
+          ScenarioNodeId(commitPrefix, nodeId) -> node
+            .resolveRelCid(makeAbs)
+            .mapNodeId(ScenarioNodeId(commitPrefix, _))
+      }(breakOut),
+      explicitDisclosure = enrichedTx.explicitDisclosure.map {
+        case (nodeId, ps) =>
+          (ScenarioNodeId(commitPrefix, nodeId), ps)
+      },
+      localImplicitDisclosure = enrichedTx.localImplicitDisclosure.map {
+        case (nodeId, ps) =>
+          (ScenarioNodeId(commitPrefix, nodeId), ps)
+      },
+      globalImplicitDisclosure = enrichedTx.globalImplicitDisclosure,
+      failedAuthorizations = enrichedTx.failedAuthorizations,
+    )
   }
 
   /** Scenario step representing the actions executed in a scenario. */

@@ -8,13 +8,11 @@ import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Node._
-import com.digitalasset.daml.lf.value.CidResolver.RelCidResolver
-import com.digitalasset.daml.lf.value.{CidResolver3, Value}
+import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value._
 import scalaz.Equal
 
 import scala.annotation.tailrec
-import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.breakOut
 import scala.collection.immutable.HashMap
 
@@ -23,7 +21,9 @@ case class VersionedTransaction[Nid, Cid](
     transaction: GenTransaction.WithTxValue[Nid, Cid],
 ) {
 
-  @deprecated("use TransactionVersion.makeRelCidAbs", since = "0.12.51")
+  @deprecated(
+    "use resolveRelCid/assertNoCid/assertNoRelCid from the companion object",
+    since = "0.13.51")
   def mapContractId[Cid2](f: Cid => Cid2): VersionedTransaction[Nid, Cid2] =
     copy(transaction = transaction.mapContractIdAndValue(f, _.mapContractId(f)))
 
@@ -80,7 +80,7 @@ case class VersionedTransaction[Nid, Cid](
   * For performance reasons, users are not required to call `isWellFormed`.
   * Therefore, it is '''forbidden''' to create ill-formed instances, i.e., instances with `!isWellFormed.isEmpty`.
   */
-case class GenTransaction[Nid, Cid, +Val](
+case class GenTransaction[Nid, +Cid, +Val](
     nodes: HashMap[Nid, GenNode[Nid, Cid, Val]],
     roots: ImmArray[Nid],
     optUsedPackages: Option[Set[PackageId]],
@@ -97,27 +97,22 @@ case class GenTransaction[Nid, Cid, +Val](
     GenTransaction.map3(f, g, h)(this)
 
   def resolveRelCid[Nid2, Cid2, Val2](f: Value.RelativeContractId => Ref.ContractIdString)(
-      implicit resolver1: RelCidResolver[Nid, Nid2],
-      resolver2: RelCidResolver[Cid, Cid2],
-      resolve3: RelCidResolver[Val, Val2]
+      implicit resolver1: value.CidResolver.RelCidResolver[Nid, Nid2],
+      resolver2: value.CidResolver.RelCidResolver[Cid, Cid2],
+      resolve3: value.CidResolver.RelCidResolver[Val, Val2]
   ): GenTransaction[Nid2, Cid2, Val2] =
     GenTransaction.resolveRelCid(f, this)
 
-  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
+  @deprecated(
+    "use resolveRelCid/assertNoCid/assertNoRelCid from the companion object",
+    since = "0.13.51")
   def mapContractIdAndValue[Cid2, Val2](
       f: Cid => Cid2,
       g: Val => Val2,
   ): GenTransaction[Nid, Cid2, Val2] =
     map3(identity, f, g)
 
-  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
-  def mapContractId[Cid2](f: Cid => Cid2)(
-      implicit ev: Val <:< VersionedValue[Cid],
-  ): WithTxValue[Nid, Cid2] =
-    mapContractIdAndValue(f, _.mapContractId(f))
-
   /** Note: the provided function must be injective, otherwise the transaction will be corrupted. */
-  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
   def mapNodeId[Nid2](f: Nid => Nid2): GenTransaction[Nid2, Cid, Val] =
     map3(f, identity, identity)
 
@@ -242,7 +237,7 @@ case class GenTransaction[Nid, Cid, +Val](
     *       However, requiring [[Equal]]`[Val2]` as `isReplayedBy` does would
     *       also solve the contains problem.  Food for thought
     */
-  final def equalForest(other: GenTransaction[_, Cid, Val @uncheckedVariance]): Boolean =
+  final def equalForest[Cid2 >: Cid, Val2 >: Val](other: GenTransaction[_, Cid2, Val2]): Boolean =
     compareForest(other)(_ == _)
 
   /**
@@ -302,9 +297,9 @@ case class GenTransaction[Nid, Cid, +Val](
     *
     * @note This function is asymmetric.
     */
-  final def isReplayedBy[Nid2, Val2 >: Val](
-      other: GenTransaction[Nid2, Cid, Val2],
-  )(implicit ECid: Equal[Cid], EVal: Equal[Val2]): Boolean =
+  final def isReplayedBy[Nid2, Cid2 >: Cid, Val2 >: Val](
+      other: GenTransaction[Nid2, Cid2, Val2],
+  )(implicit ECid: Equal[Cid2], EVal: Equal[Val2]): Boolean =
     compareForest(other)(Node.isReplayedBy(_, _))
 
   /** checks that all the values contained are serializable */
@@ -343,8 +338,8 @@ case class GenTransaction[Nid, Cid, +Val](
     }
 }
 
-object GenTransaction extends CidResolver3[GenTransaction] {
-  type WithTxValue[Nid, Cid] = GenTransaction[Nid, Cid, Transaction.Value[Cid]]
+object GenTransaction extends value.CidResolver3[GenTransaction] {
+  type WithTxValue[Nid, +Cid] = GenTransaction[Nid, Cid, Transaction.Value[Cid]]
 
   case class NotWellFormedError[Nid](nid: Nid, reason: NotWellFormedErrorReason)
   sealed trait NotWellFormedErrorReason

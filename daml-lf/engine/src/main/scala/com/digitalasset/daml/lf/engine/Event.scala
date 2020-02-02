@@ -1,7 +1,9 @@
 // Copyright (c) 2020 The DAML Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.daml.lf.engine
+package com.digitalasset.daml.lf
+package engine
+
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Identifier, Party}
 import com.digitalasset.daml.lf.transaction.Node._
 import com.digitalasset.daml.lf.data.{FrontStack, FrontStackCons, ImmArray}
@@ -16,6 +18,9 @@ import scala.annotation.tailrec
 
 sealed trait Event[+Nid, +Cid, +Val] extends Product with Serializable {
   def witnesses: Set[Party]
+  @deprecated(
+    "use resolveRelCid/assertNoCid/assertNoRelCid from the comapnion object",
+    since = "0.13.51")
   def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): Event[Nid, Cid2, Val2]
   def mapNodeId[Nid2](f: Nid => Nid2): Event[Nid2, Cid, Val]
 }
@@ -51,7 +56,9 @@ final case class CreateEvent[Cid, Val](
     */
   val stakeholders = signatories.union(observers).intersect(witnesses)
 
-  @deprecated("use Value.resolveRelCid/Value.assertNoCid/Value.assertNoRelCid", since = "0.13.51")
+  @deprecated(
+    "use resolveRelCid/assertNoCid/assertNoRelCid from the comapnion object",
+    since = "0.13.51")
   override def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): CreateEvent[Cid2, Val2] =
     copy(
       contractId = f(contractId),
@@ -86,6 +93,10 @@ final case class ExerciseEvent[Nid, Cid, Val](
     witnesses: Set[Party],
     exerciseResult: Option[Val])
     extends Event[Nid, Cid, Val] {
+
+  @deprecated(
+    "use resolveRelCid/assertNoCid/assertNoRelCid from the comapnion object",
+    since = "0.13.51")
   override def mapContractId[Cid2, Val2](
       f: Cid => Cid2,
       g: Val => Val2): ExerciseEvent[Nid, Cid2, Val2] =
@@ -99,7 +110,60 @@ final case class ExerciseEvent[Nid, Cid, Val](
     copy(children = children.map(f))
 }
 
-object Event {
+object Event extends value.CidResolver3[Event] {
+
+  override private[lf] def map3[Nid, Cid, Val, Nid2, Cid2, Val2](
+      f1: Nid => Nid2,
+      f2: Cid => Cid2,
+      f3: Val => Val2
+  ): Event[Nid, Cid, Val] => Event[Nid2, Cid2, Val2] = {
+    case CreateEvent(
+        contractId,
+        templateId,
+        contractKey,
+        argument,
+        agreementText,
+        signatories,
+        observers,
+        witnesses,
+        ) =>
+      CreateEvent(
+        f2(contractId),
+        templateId,
+        contractKey.map(KeyWithMaintainers.map1(f3)),
+        f3(argument),
+        agreementText,
+        signatories,
+        observers,
+        witnesses,
+      )
+
+    case ExerciseEvent(
+        contractId,
+        templateId,
+        choice,
+        choiceArgument,
+        actingParties,
+        isConsuming,
+        children,
+        stakeholders,
+        witnesses,
+        exerciseResult,
+        ) =>
+      ExerciseEvent(
+        f2(contractId),
+        templateId,
+        choice,
+        f3(choiceArgument),
+        actingParties,
+        isConsuming,
+        children.map(f1),
+        stakeholders,
+        witnesses,
+        exerciseResult.map(f3),
+      )
+  }
+
   case class Events[Nid, Cid, Val](roots: ImmArray[Nid], events: Map[Nid, Event[Nid, Cid, Val]]) {
     // filters from the leaves upwards: if any any exercise node returns false all its children will be purged, too
     def filter(f: Event[Nid, Cid, Val] => Boolean): Events[Nid, Cid, Val] = {
@@ -125,6 +189,9 @@ object Event {
       Events(roots.filter(liveEvts.contains), Map() ++ liveEvts)
     }
 
+    @deprecated(
+      "use resolveRelCid/assertNoCid/assertNoRelCid from the companion object",
+      since = "0.13.51")
     def mapContractIdAndValue[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): Events[Nid, Cid2, Val2] =
       // do NOT use `Map#mapValues`! it applies the function lazily on lookup. see #1861
       copy(events = events.transform { (_, value) =>
@@ -208,4 +275,18 @@ object Event {
     go(FrontStack(relevantRoots))
     Events(relevantRoots, Map() ++ evts)
   }
+
+  object Events extends value.CidResolver3[Events] {
+    override private[lf] def map3[Nid, Cid, Val, Nid2, Cid2, Val2](
+        f1: Nid => Nid2,
+        f2: Cid => Cid2,
+        f3: Val => Val2) = {
+      case Events(roots, events) =>
+        Events(roots.map(f1), events.map {
+          case (id, event) => f1(id) -> Event.map3(f1, f2, f3)(event)
+        })
+    }
+
+  }
+
 }

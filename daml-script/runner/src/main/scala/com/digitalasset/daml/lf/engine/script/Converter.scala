@@ -5,10 +5,10 @@ package com.digitalasset.daml.lf.engine.script
 
 import io.grpc.StatusRuntimeException
 import java.util
+
 import scala.annotation.tailrec
 import scala.collection.JavaConverters._
-import scalaz.{\/-, -\/}
-
+import scalaz.{-\/, \/-}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.engine.{ResultDone, ValueTranslator}
 import com.digitalasset.daml.lf.iface
@@ -19,27 +19,28 @@ import com.digitalasset.daml.lf.speedy.SBuiltin._
 import com.digitalasset.daml.lf.speedy.SExpr._
 import com.digitalasset.daml.lf.speedy.Speedy
 import com.digitalasset.daml.lf.speedy.SResult._
-import com.digitalasset.daml.lf.speedy.{SValue, SExpr}
+import com.digitalasset.daml.lf.speedy.{SExpr, SValue}
 import com.digitalasset.daml.lf.speedy.SValue._
-import com.digitalasset.daml.lf.value.Value.{AbsoluteContractId, RelativeContractId}
+import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.CompiledPackages
 import com.digitalasset.ledger.api.v1.commands.{
   Command,
-  CreateCommand,
-  ExerciseCommand,
-  ExerciseByKeyCommand,
   CreateAndExerciseCommand,
+  CreateCommand,
+  ExerciseByKeyCommand,
+  ExerciseCommand
 }
 import com.digitalasset.ledger.api.v1.event.{CreatedEvent, ExercisedEvent}
 import com.digitalasset.ledger.api.v1.transaction.TreeEvent
 import com.digitalasset.ledger.api.v1.value
 import com.digitalasset.ledger.api.validation.ValueValidator
 import com.digitalasset.platform.participant.util.LfEngineToApi.{
-  toApiIdentifier,
   lfValueToApiRecord,
-  lfValueToApiValue
+  lfValueToApiValue,
+  toApiIdentifier
 }
 import com.digitalasset.daml.lf.speedy.Pretty
+import com.digitalasset.daml.lf.value.Value.{AbsoluteContractId, RelativeContractId}
 
 class ConverterException(message: String) extends RuntimeException(message)
 
@@ -48,34 +49,18 @@ case class AnyChoice(name: String, arg: SValue)
 case class AnyContractKey(key: SValue)
 
 object Converter {
-  private def toLedgerRecord(v: SValue): Either[String, value.Record] = {
-    try {
-      lfValueToApiRecord(
-        true,
-        v.toValue.mapContractId {
-          case rcoid: RelativeContractId =>
-            throw new ConverterException(s"Unexpected contract id $rcoid")
-          case acoid: AbsoluteContractId => acoid
-        }
-      )
-    } catch {
-      case ex: ConverterException => Left(ex.getMessage())
-    }
-  }
-  private def toLedgerValue(v: SValue) = {
-    try {
-      lfValueToApiValue(
-        true,
-        v.toValue.mapContractId {
-          case rcoid: RelativeContractId =>
-            throw new ConverterException(s"Unexpected contract id $rcoid")
-          case acoid: AbsoluteContractId => acoid
-        }
-      )
-    } catch {
-      case ex: ConverterException => Left(ex.getMessage())
-    }
-  }
+
+  private def toLedgerRecord(v: SValue): Either[String, value.Record] =
+    for {
+      value <- Value.assertNoRelCid(v.toValue).left.map(rcoid => s"Unexpected contract id $rcoid")
+      apiRecord <- lfValueToApiRecord(true, value)
+    } yield apiRecord
+
+  private def toLedgerValue(v: SValue): Either[String, value.Value] =
+    for {
+      value <- Value.assertNoRelCid(v.toValue).left.map(rcoid => s"Unexpected contract id $rcoid")
+      apiValue <- lfValueToApiValue(true, value)
+    } yield apiValue
 
   def toAnyTemplate(v: SValue): Either[String, AnyTemplate] = {
     v match {
