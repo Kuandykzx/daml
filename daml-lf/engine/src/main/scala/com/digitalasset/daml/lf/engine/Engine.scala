@@ -231,8 +231,7 @@ final class Engine {
   private[this] def asValueWithAbsoluteContractIds(
       v: Value[Value.ContractId]
   ): Result[Value[Value.AbsoluteContractId]] =
-    Value
-      .assertNoRelCid(v)
+    v.ensureNoRelCid
       .fold(
         rcoid => ResultError(ValidationError(s"unexpected relative contract id $rcoid")),
         ResultDone(_)

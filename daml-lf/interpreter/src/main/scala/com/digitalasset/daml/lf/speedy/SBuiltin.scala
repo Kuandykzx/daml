@@ -1524,17 +1524,20 @@ object SBuiltin {
     v match {
       case SStruct(flds, vals)
           if flds.length == 2 && flds(0) == keyFieldName && flds(1) == maintainersFieldName =>
-        asVersionedValue(vals.get(0).toValue) match {
-          case Left(err) => crash(err)
-          case Right(keyVal) =>
-            val keyWithoutContractIds =
-              V.VersionedValue.map1((coid: V.ContractId) =>
-                crash(s"Unexpected contract id in key: $coid"))(keyVal)
+        rightOrCrash(
+          for {
+            keyVal <- vals
+              .get(0)
+              .toValue
+              .ensureNoCid
+              .left
+              .map(coid => crash(s"Unexpected contract id in key: $coid"))
+            versionedKeyVal <- asVersionedValue(keyVal)
+          } yield
             KeyWithMaintainers(
-              key = keyWithoutContractIds,
-              maintainers = extractParties(vals.get(1)),
-            )
-        }
+              key = versionedKeyVal,
+              maintainers = extractParties(vals.get(1))
+            ))
       case _ => crash(s"Invalid key with maintainers: $v")
     }
 
@@ -1570,5 +1573,8 @@ object SBuiltin {
 
   private def rightOrArithmeticError[A](message: String, mb: Either[String, A]): A =
     mb.fold(_ => throw DamlEArithmeticError(s"$message"), identity)
+
+  private def rightOrCrash[A](either: Either[String, A]) =
+    either.fold(crash, identity)
 
 }

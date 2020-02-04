@@ -52,13 +52,13 @@ object Converter {
 
   private def toLedgerRecord(v: SValue): Either[String, value.Record] =
     for {
-      value <- Value.assertNoRelCid(v.toValue).left.map(rcoid => s"Unexpected contract id $rcoid")
+      value <- Value.ensureNoRelCid(v.toValue).left.map(rcoid => s"Unexpected contract id $rcoid")
       apiRecord <- lfValueToApiRecord(true, value)
     } yield apiRecord
 
   private def toLedgerValue(v: SValue): Either[String, value.Value] =
     for {
-      value <- Value.assertNoRelCid(v.toValue).left.map(rcoid => s"Unexpected contract id $rcoid")
+      value <- Value.ensureNoRelCid(v.toValue).left.map(rcoid => s"Unexpected contract id $rcoid")
       apiValue <- lfValueToApiValue(true, value)
     } yield apiValue
 

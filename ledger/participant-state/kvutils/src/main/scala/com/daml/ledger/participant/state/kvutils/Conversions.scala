@@ -243,7 +243,7 @@ private[state] object Conversions {
       .fold(
         err => throw Err.DecodeError("ContractInstance", err.errorMessage),
         coinst =>
-          coinst.assertNoCid
+          coinst.ensureNoCid
             .fold(
               _ =>
                 throw Err.InternalError(
@@ -259,7 +259,7 @@ private[state] object Conversions {
       .fold(err => throw Err.InternalError(s"encodeContractInstance failed: $err"), identity)
 
   def forceNoContractIds(v: VersionedValue[ContractId]): VersionedValue[Nothing] =
-    v.assertNoCid.fold(
+    v.ensureNoCid.fold(
       coid => throw Err.InternalError(s"Contract identifier encountered in contract key! $coid"),
       identity,
     )

@@ -27,6 +27,7 @@ object Ledger {
   private object ScenarioNodeId {
     def apply(commitPrefix: LedgerString, txnid: Transaction.NodeId): ScenarioNodeId =
       txNodeIdToScenarioNodeId(commitPrefix, txnid.index)
+
   }
 
   /** This is the function that we use to turn relative contract ids (which are made of
@@ -78,7 +79,7 @@ object Ledger {
 
   @inline
   def assertNoContractId(key: VersionedValue[Value.ContractId]): VersionedValue[Nothing] =
-    key.assertNoCid.fold(
+    key.ensureNoCid.fold(
       cid => crash(s"Not expecting to find a contract id here, but found '$cid'"),
       identity,
     )

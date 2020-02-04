@@ -22,7 +22,7 @@ case class VersionedTransaction[Nid, Cid](
 ) {
 
   @deprecated(
-    "use resolveRelCid/assertNoCid/assertNoRelCid from the companion object",
+    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
     since = "0.13.51")
   def mapContractId[Cid2](f: Cid => Cid2): VersionedTransaction[Nid, Cid2] =
     copy(transaction = transaction.mapContractIdAndValue(f, _.mapContractId(f)))
@@ -96,15 +96,17 @@ case class GenTransaction[Nid, +Cid, +Val](
   ): GenTransaction[Nid2, Cid2, Val2] =
     GenTransaction.map3(f, g, h)(this)
 
-  def resolveRelCid[Nid2, Cid2, Val2](f: Value.RelativeContractId => Ref.ContractIdString)(
-      implicit resolver1: value.CidResolver.RelCidResolver[Nid, Nid2],
-      resolver2: value.CidResolver.RelCidResolver[Cid, Cid2],
-      resolve3: value.CidResolver.RelCidResolver[Val, Val2]
+  // Shortcut for value.CidContainer.resolveRelCid(f, this)
+  def resolveRelCid[Nid2, Cid2, Val2](f: Value.RelativeContractId => ContractIdString)(
+      implicit mapper: value.CidMapper.RelCidResolverMapper[
+        GenTransaction[Nid, Cid, Val],
+        GenTransaction[Nid2, Cid2, Val2]
+      ],
   ): GenTransaction[Nid2, Cid2, Val2] =
-    GenTransaction.resolveRelCid(f, this)
+    value.CidContainer.resolveRelCid(f, this)(mapper)
 
   @deprecated(
-    "use resolveRelCid/assertNoCid/assertNoRelCid from the companion object",
+    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
     since = "0.13.51")
   def mapContractIdAndValue[Cid2, Val2](
       f: Cid => Cid2,
@@ -338,7 +340,7 @@ case class GenTransaction[Nid, +Cid, +Val](
     }
 }
 
-object GenTransaction extends value.CidResolver3[GenTransaction] {
+object GenTransaction extends value.CidContainer3[GenTransaction] {
   type WithTxValue[Nid, +Cid] = GenTransaction[Nid, Cid, Transaction.Value[Cid]]
 
   case class NotWellFormedError[Nid](nid: Nid, reason: NotWellFormedErrorReason)
@@ -350,7 +352,8 @@ object GenTransaction extends value.CidResolver3[GenTransaction] {
   override private[lf] def map3[A1, A2, A3, B1, B2, B3](
       f1: A1 => B1,
       f2: A2 => B2,
-      f3: A3 => B3): GenTransaction[A1, A2, A3] => GenTransaction[B1, B2, B3] = {
+      f3: A3 => B3,
+  ): GenTransaction[A1, A2, A3] => GenTransaction[B1, B2, B3] = {
     case GenTransaction(nodes, roots, optUsedPackages, transactionSeed) =>
       GenTransaction(
         nodes = nodes.map {

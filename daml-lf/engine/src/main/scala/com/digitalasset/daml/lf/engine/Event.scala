@@ -19,7 +19,7 @@ import scala.annotation.tailrec
 sealed trait Event[+Nid, +Cid, +Val] extends Product with Serializable {
   def witnesses: Set[Party]
   @deprecated(
-    "use resolveRelCid/assertNoCid/assertNoRelCid from the comapnion object",
+    "use resolveRelCid/ensureNoCid/ensureNoRelCid from the value.CidContainer",
     since = "0.13.51")
   def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): Event[Nid, Cid2, Val2]
   def mapNodeId[Nid2](f: Nid => Nid2): Event[Nid2, Cid, Val]
@@ -57,7 +57,7 @@ final case class CreateEvent[Cid, Val](
   val stakeholders = signatories.union(observers).intersect(witnesses)
 
   @deprecated(
-    "use resolveRelCid/assertNoCid/assertNoRelCid from the comapnion object",
+    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
     since = "0.13.51")
   override def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): CreateEvent[Cid2, Val2] =
     copy(
@@ -95,7 +95,7 @@ final case class ExerciseEvent[Nid, Cid, Val](
     extends Event[Nid, Cid, Val] {
 
   @deprecated(
-    "use resolveRelCid/assertNoCid/assertNoRelCid from the comapnion object",
+    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
     since = "0.13.51")
   override def mapContractId[Cid2, Val2](
       f: Cid => Cid2,
@@ -110,7 +110,7 @@ final case class ExerciseEvent[Nid, Cid, Val](
     copy(children = children.map(f))
 }
 
-object Event extends value.CidResolver3[Event] {
+object Event extends value.CidContainer3[Event] {
 
   override private[lf] def map3[Nid, Cid, Val, Nid2, Cid2, Val2](
       f1: Nid => Nid2,
@@ -190,7 +190,7 @@ object Event extends value.CidResolver3[Event] {
     }
 
     @deprecated(
-      "use resolveRelCid/assertNoCid/assertNoRelCid from the companion object",
+      "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
       since = "0.13.51")
     def mapContractIdAndValue[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): Events[Nid, Cid2, Val2] =
       // do NOT use `Map#mapValues`! it applies the function lazily on lookup. see #1861
@@ -276,11 +276,12 @@ object Event extends value.CidResolver3[Event] {
     Events(relevantRoots, Map() ++ evts)
   }
 
-  object Events extends value.CidResolver3[Events] {
+  object Events extends value.CidContainer3[Events] {
     override private[lf] def map3[Nid, Cid, Val, Nid2, Cid2, Val2](
         f1: Nid => Nid2,
         f2: Cid => Cid2,
-        f3: Val => Val2) = {
+        f3: Val => Val2,
+    ): Events[Nid, Cid, Val] => Events[Nid2, Cid2, Val2] = {
       case Events(roots, events) =>
         Events(roots.map(f1), events.map {
           case (id, event) => f1(id) -> Event.map3(f1, f2, f3)(event)

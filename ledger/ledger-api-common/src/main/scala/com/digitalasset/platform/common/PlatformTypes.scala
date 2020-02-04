@@ -41,7 +41,7 @@ object PlatformTypes {
   val ExerciseEvent: E.ExerciseEvent.type = E.ExerciseEvent
 
   @deprecated(
-    "use resolveRelCid/assertNoCid/assertNoRelCid from the companion object",
+    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
     since = "0.13.51")
   def mapContractIdAndValue[Nid, Cid, Cid2](tx: GenTransaction[Nid, Cid])(
       f: Cid => Cid2): GenTransaction[Nid, Cid2] =

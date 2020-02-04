@@ -16,13 +16,7 @@ import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.engine.{Blinding, Engine}
 import com.digitalasset.daml.lf.transaction.Node.{GlobalKey, NodeCreate, NodeExercises}
 import com.digitalasset.daml.lf.transaction.BlindingInfo
-import com.digitalasset.daml.lf.value.Value.{
-  AbsoluteContractId,
-  ContractId,
-  ContractInst,
-  NodeId,
-  VersionedValue
-}
+import com.digitalasset.daml.lf.value.Value.{AbsoluteContractId, ContractId, NodeId, VersionedValue}
 import org.slf4j.LoggerFactory
 
 import scala.collection.JavaConverters._
@@ -237,7 +231,7 @@ private[kvutils] case class ProcessTransactionSubmission(
             blindingInfo.localDisclosure(NodeId(key.getContractId.getNodeId.toInt))
           cs.addAllLocallyDisclosedTo((localDisclosure: Iterable[String]).asJava)
           val absCoInst =
-            ContractInst.resolveRelCid(Conversions.toAbsCoid(entryId, _), createNode.coinst)
+            createNode.coinst.resolveRelCid(Conversions.toAbsCoid(entryId, _))
           cs.setContractInstance(
             Conversions.encodeContractInstance(absCoInst)
           )

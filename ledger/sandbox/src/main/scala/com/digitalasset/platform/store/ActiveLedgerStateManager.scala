@@ -156,7 +156,7 @@ class ActiveLedgerStateManager[ALS](initialState: => ALS)(
                     .map(p => p -> transactionId)
                     .toMap,
                   key = nc.key.map(
-                    _.assertNoCid.fold(
+                    _.ensureNoCid.fold(
                       coid =>
                         throw new IllegalStateException(s"Contract ID $coid found in contract key"),
                       identity,
@@ -202,7 +202,7 @@ class ActiveLedgerStateManager[ALS](initialState: => ALS)(
                 )
               case nlkup: N.NodeLookupByKey.WithTxValue[AbsoluteContractId] =>
                 // Check that the stored lookup result matches the current result
-                val key = nlkup.key.key.assertNoCid.fold(
+                val key = nlkup.key.key.ensureNoCid.fold(
                   coid =>
                     throw new IllegalStateException(s"Contract ID $coid found in contract key"),
                   identity

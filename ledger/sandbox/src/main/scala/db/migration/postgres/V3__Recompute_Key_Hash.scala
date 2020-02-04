@@ -58,7 +58,7 @@ class V3__Recompute_Key_Hash extends BaseJavaMigration {
         val key = ValueSerializer
           .deserializeValue(rows.getBytes("contract_key"))
           .fold(err => throw new IllegalArgumentException(err.errorMessage), identity)
-          .assertNoCid
+          .ensureNoCid
           .fold(
             coid => throw new IllegalArgumentException(s"Found contract ID $coid in contract key"),
             identity)
