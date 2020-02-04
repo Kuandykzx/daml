@@ -8,7 +8,7 @@ import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Node._
-import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.{CidContainer, Value}
 import com.digitalasset.daml.lf.value.Value._
 import scalaz.Equal
 
@@ -21,9 +21,7 @@ case class VersionedTransaction[Nid, Cid](
     transaction: GenTransaction.WithTxValue[Nid, Cid],
 ) {
 
-  @deprecated(
-    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-    since = "0.13.51")
+  @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCid", since = "0.13.51")
   def mapContractId[Cid2](f: Cid => Cid2): VersionedTransaction[Nid, Cid2] =
     copy(transaction = transaction.mapContractIdAndValue(f, _.mapContractId(f)))
 
@@ -80,14 +78,16 @@ case class VersionedTransaction[Nid, Cid](
   * For performance reasons, users are not required to call `isWellFormed`.
   * Therefore, it is '''forbidden''' to create ill-formed instances, i.e., instances with `!isWellFormed.isEmpty`.
   */
-case class GenTransaction[Nid, +Cid, +Val](
+final case class GenTransaction[Nid, +Cid, +Val](
     nodes: HashMap[Nid, GenNode[Nid, Cid, Val]],
     roots: ImmArray[Nid],
     optUsedPackages: Option[Set[PackageId]],
     transactionSeed: Option[crypto.Hash] = None,
-) {
+) extends CidContainer[GenTransaction[Nid, Cid, Val]] {
 
   import GenTransaction._
+
+  override protected val self: this.type = this
 
   private[lf] def map3[Nid2, Cid2, Val2](
       f: Nid => Nid2,
@@ -96,18 +96,7 @@ case class GenTransaction[Nid, +Cid, +Val](
   ): GenTransaction[Nid2, Cid2, Val2] =
     GenTransaction.map3(f, g, h)(this)
 
-  // Shortcut for value.CidContainer.resolveRelCid(f, this)
-  def resolveRelCid[Nid2, Cid2, Val2](f: Value.RelativeContractId => ContractIdString)(
-      implicit mapper: value.CidMapper.RelCidResolverMapper[
-        GenTransaction[Nid, Cid, Val],
-        GenTransaction[Nid2, Cid2, Val2]
-      ],
-  ): GenTransaction[Nid2, Cid2, Val2] =
-    value.CidContainer.resolveRelCid(f, this)(mapper)
-
-  @deprecated(
-    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-    since = "0.13.51")
+  @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCid", since = "0.13.51")
   def mapContractIdAndValue[Cid2, Val2](
       f: Cid => Cid2,
       g: Val => Val2,

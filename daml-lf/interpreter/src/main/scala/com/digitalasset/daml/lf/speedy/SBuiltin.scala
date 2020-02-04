@@ -1531,7 +1531,7 @@ object SBuiltin {
               .toValue
               .ensureNoCid
               .left
-              .map(coid => crash(s"Unexpected contract id in key: $coid"))
+              .map(coid => s"Unexpected contract id in key: $coid")
             versionedKeyVal <- asVersionedValue(keyVal)
           } yield
             KeyWithMaintainers(

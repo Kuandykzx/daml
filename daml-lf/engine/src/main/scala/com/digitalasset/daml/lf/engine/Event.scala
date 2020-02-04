@@ -16,13 +16,19 @@ import scala.annotation.tailrec
 // Emitted events for the API
 // --------------------------
 
-sealed trait Event[+Nid, +Cid, +Val] extends Product with Serializable {
+sealed trait Event[+Nid, +Cid, +Val]
+    extends value.CidContainer[Event[Nid, Cid, Val]]
+    with Product
+    with Serializable {
   def witnesses: Set[Party]
-  @deprecated(
-    "use resolveRelCid/ensureNoCid/ensureNoRelCid from the value.CidContainer",
-    since = "0.13.51")
-  def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): Event[Nid, Cid2, Val2]
-  def mapNodeId[Nid2](f: Nid => Nid2): Event[Nid2, Cid, Val]
+
+  final override protected val self: this.type = this
+
+  @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCid", since = "0.13.51")
+  final def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): Event[Nid, Cid2, Val2] =
+    Event.map3(identity[Nid], f, g)(this)
+  final def mapNodeId[Nid2](f: Nid => Nid2): Event[Nid2, Cid, Val] =
+    Event.map3(f, identity[Cid], identity[Val])(this)
 }
 
 /** Event for created contracts, follows ledger api event protocol
@@ -55,17 +61,6 @@ final case class CreateEvent[Cid, Val](
     * For broader and more detailed information, the consumer can use [[signatories]] and/or [[observers]].
     */
   val stakeholders = signatories.union(observers).intersect(witnesses)
-
-  @deprecated(
-    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-    since = "0.13.51")
-  override def mapContractId[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): CreateEvent[Cid2, Val2] =
-    copy(
-      contractId = f(contractId),
-      argument = g(argument),
-      contractKey = contractKey.map(_.mapValue(g)))
-
-  override def mapNodeId[Nid2](f: Nothing => Nid2): CreateEvent[Cid, Val] = this
 }
 
 /** Event for exercises
@@ -92,23 +87,7 @@ final case class ExerciseEvent[Nid, Cid, Val](
     stakeholders: Set[Party],
     witnesses: Set[Party],
     exerciseResult: Option[Val])
-    extends Event[Nid, Cid, Val] {
-
-  @deprecated(
-    "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-    since = "0.13.51")
-  override def mapContractId[Cid2, Val2](
-      f: Cid => Cid2,
-      g: Val => Val2): ExerciseEvent[Nid, Cid2, Val2] =
-    copy(
-      contractId = f(contractId),
-      choiceArgument = g(choiceArgument),
-      exerciseResult = exerciseResult.map(g)
-    )
-
-  override def mapNodeId[Nid2](f: Nid => Nid2): ExerciseEvent[Nid2, Cid, Val] =
-    copy(children = children.map(f))
-}
+    extends Event[Nid, Cid, Val]
 
 object Event extends value.CidContainer3[Event] {
 
@@ -189,9 +168,7 @@ object Event extends value.CidContainer3[Event] {
       Events(roots.filter(liveEvts.contains), Map() ++ liveEvts)
     }
 
-    @deprecated(
-      "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-      since = "0.13.51")
+    @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCid", since = "0.13.51")
     def mapContractIdAndValue[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): Events[Nid, Cid2, Val2] =
       // do NOT use `Map#mapValues`! it applies the function lazily on lookup. see #1861
       copy(events = events.transform { (_, value) =>

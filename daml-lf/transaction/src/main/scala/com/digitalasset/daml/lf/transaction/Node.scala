@@ -6,7 +6,7 @@ package transaction
 
 import com.digitalasset.daml.lf.data.{ImmArray, ScalazEqual}
 import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.value.{CidContainer, Value}
 import com.digitalasset.daml.lf.value.Value.{ContractInst, VersionedValue}
 
 import scala.language.higherKinds
@@ -21,21 +21,20 @@ import scalaz.syntax.equal._
 object Node {
 
   /** Transaction nodes parametrized over identifier type */
-  sealed trait GenNode[+Nid, +Cid, +Val] extends Product with Serializable {
-    @deprecated(
-      "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-      since = "0.13.51")
-    def mapContractIdAndValue[Cid2, Val2](f: Cid => Cid2, g: Val => Val2): GenNode[Nid, Cid2, Val2]
-    def mapNodeId[Nid2](f: Nid => Nid2): GenNode[Nid2, Cid, Val]
+  sealed trait GenNode[+Nid, +Cid, +Val]
+      extends Product
+      with Serializable
+      with CidContainer[GenNode[Nid, Cid, Val]] {
 
-    // Shortcut for value.CidContainer.resolveRelCid(f, this)
-    def resolveRelCid[Nid2, Cid2, Val2](f: Value.RelativeContractId => ContractIdString)(
-        implicit mapper: value.CidMapper.RelCidResolverMapper[
-          GenNode[Nid, Cid, Val],
-          GenNode[Nid2, Cid2, Val2]
-        ],
-    ): GenNode[Nid2, Cid2, Val2] =
-      value.CidContainer.resolveRelCid(f, this)(mapper)
+    final override protected val self: this.type = this
+
+    @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCid", since = "0.13.51")
+    final def mapContractIdAndValue[Cid2, Val2](
+        f: Cid => Cid2,
+        g: Val => Val2): GenNode[Nid, Cid2, Val2] =
+      GenNode.map3(identity[Nid], f, g)(this)
+    final def mapNodeId[Nid2](f: Nid => Nid2): GenNode[Nid2, Cid, Val] =
+      GenNode.map3(f, identity[Cid], identity[Val])(this)
 
     /** Required authorizers (see ledger model); UNSAFE TO USE on fetch nodes of transaction with versions < 5
       *
@@ -148,17 +147,6 @@ object Node {
       key: Option[KeyWithMaintainers[Val]],
   ) extends LeafOnlyNode[Cid, Val] {
 
-    @deprecated(
-      "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-      since = "0.13.51")
-    override def mapContractIdAndValue[Cid2, Val2](
-        f: Cid => Cid2,
-        g: Val => Val2,
-    ): NodeCreate[Cid2, Val2] =
-      copy(coid = f(coid), coinst = coinst.mapValue(g), key = key.map(_.mapValue(g)))
-
-    override def mapNodeId[Nid2](f: Nothing => Nid2): NodeCreate[Cid, Val] = this
-
     override def requiredAuthorizers(): Set[Party] = signatories
 
   }
@@ -174,17 +162,6 @@ object Node {
       signatories: Set[Party],
       stakeholders: Set[Party],
   ) extends LeafOnlyNode[Cid, Nothing] {
-
-    @deprecated(
-      "use resolveRelCid/ensureNoCid/ensureNoRelCid from value.CidContainer",
-      since = "0.13.51")
-    override def mapContractIdAndValue[Cid2, Val2](
-        f: Cid => Cid2,
-        g: Nothing => Val2,
-    ): NodeFetch[Cid2] =
-      copy(coid = f(coid))
-
-    override def mapNodeId[Nid2](f: Nothing => Nid2): NodeFetch[Cid] = this
 
     /** This blows up on transactions with version <5. The caller must ensure that the transaction is of
       * this form.
@@ -219,24 +196,7 @@ object Node {
       key: Option[KeyWithMaintainers[Val]],
   ) extends GenNode[Nid, Cid, Val] {
 
-    @deprecated("use Value.resolveRelCid/Value.ensureNoCid/Value.ensureNoRelCid", since = "0.13.51")
-    override def mapContractIdAndValue[Cid2, Val2](
-        f: Cid => Cid2,
-        g: Val => Val2,
-    ): NodeExercises[Nid, Cid2, Val2] =
-      copy(
-        targetCoid = f(targetCoid),
-        chosenValue = g(chosenValue),
-        exerciseResult = exerciseResult.map(g),
-        key = key.map(_.mapValue(g)),
-      )
-
-    override def mapNodeId[Nid2](f: Nid => Nid2): NodeExercises[Nid2, Cid, Val] =
-      copy(
-        children = children.map(f),
-      )
-
-    override def requiredAuthorizers(): Set[Party] = actingParties
+    override final def requiredAuthorizers(): Set[Party] = actingParties
 
   }
 
@@ -284,34 +244,20 @@ object Node {
       result: Option[Cid],
   ) extends LeafOnlyNode[Cid, Val] {
 
-    @deprecated("use Value.resolveRelCid/Value.ensureNoCid/Value.ensureNoRelCid", since = "0.13.51")
-    override def mapContractIdAndValue[Cid2, Val2](
-        f: Cid => Cid2,
-        g: Val => Val2,
-    ): NodeLookupByKey[Cid2, Val2] =
-      copy(result = result.map(f), key = key.mapValue(g))
-
-    override def mapNodeId[Nid2](f: Nothing => Nid2): NodeLookupByKey[Cid, Val] = this
-
     override def requiredAuthorizers(): Set[Party] = key.maintainers
 
   }
 
   object NodeLookupByKey extends WithTxValue2[NodeLookupByKey]
 
-  case class KeyWithMaintainers[+Val](key: Val, maintainers: Set[Party]) {
+  final case class KeyWithMaintainers[+Val](key: Val, maintainers: Set[Party])
+      extends value.CidContainer[KeyWithMaintainers[Val]] {
+
+    override protected val self: KeyWithMaintainers[Val] = this
+
     @deprecated("Use resolveRelCid/ensureNoCid/ensureNoRelCid from CidContainer", since = "0.13.51")
     def mapValue[Val1](f: Val => Val1): KeyWithMaintainers[Val1] =
       KeyWithMaintainers.map1(f)(this)
-
-    // Shortcut for KeyWithMaintainers.assertNodCid(this)
-    def ensureNoCid[Val2](
-        implicit mapper: value.CidMapper.NoCidMapper[
-          KeyWithMaintainers[Val],
-          KeyWithMaintainers[Val2]],
-    ): Either[value.Value.ContractId, KeyWithMaintainers[Val2]] =
-      value.CidContainer.ensureNoCid(this)(mapper)
-
   }
 
   object KeyWithMaintainers extends value.CidContainer1[KeyWithMaintainers] {

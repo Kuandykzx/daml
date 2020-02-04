@@ -21,26 +21,16 @@ import scalaz.std.tuple._
 import scalaz.syntax.equal._
 
 /** Values   */
-sealed abstract class Value[+Cid] extends Product with Serializable {
+sealed abstract class Value[+Cid] extends CidContainer[Value[Cid]] with Product with Serializable {
   import Value._
 
-  def mapContractId[Cid2](f: Cid => Cid2): Value[Cid2] =
+  final override protected val self: this.type = this
+
+  final def mapContractId[Cid2](f: Cid => Cid2): Value[Cid2] =
     map1(f)
 
-  private[lf] def map1[Cid2](f: Cid => Cid2): Value[Cid2] =
+  private[lf] final def map1[Cid2](f: Cid => Cid2): Value[Cid2] =
     Value.map1(f)(this)
-
-  // Shortcut for CidContainer.ensureNoCid(this)
-  def ensureNoCid[Cid2](
-      implicit mapper: CidMapper.NoCidMapper[Value[Cid], Value[Cid2]],
-  ): Either[ContractId, Value[Cid2]] =
-    CidContainer.ensureNoCid(this)
-
-  // Shortcut for CidContainer.ensureNoRelCid(this)
-  def ensureNoRelCid[Cid2](
-      implicit mapper: CidMapper.NoRelCidMapper[Value[Cid], Value[Cid2]],
-  ): Either[ContractId, Value[Cid2]] =
-    CidContainer.ensureNoRelCid(this)
 
   /** returns a list of validation errors: if the result is non-empty the value is
     * _not_ serializable.
@@ -187,20 +177,17 @@ object Value extends CidContainer1[Value] {
     */
   val MAXIMUM_NESTING: Int = 100
 
-  final case class VersionedValue[+Cid](version: ValueVersion, value: Value[Cid]) {
+  final case class VersionedValue[+Cid](version: ValueVersion, value: Value[Cid])
+      extends CidContainer[VersionedValue[Cid]] {
 
-    @deprecated("use Value.resolveRelCid/Value.ensureNoCid/Value.ensureNoRelCid", since = "0.13.51")
+    override protected val self: this.type = this
+
+    @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCidd", since = "0.13.51")
     def mapContractId[Cid2](f: Cid => Cid2): VersionedValue[Cid2] =
       map1(f)
 
     private[lf] def map1[Cid2](f: Cid => Cid2): VersionedValue[Cid2] =
       VersionedValue.map1(f)(this)
-
-    // Shortcut for CidContainer.ensureNoCid(this)
-    def ensureNoCid[Cid2](
-        implicit mapper: CidMapper.NoCidMapper[VersionedValue[Cid], VersionedValue[Cid2]],
-    ): Either[ContractId, VersionedValue[Cid2]] =
-      CidContainer.ensureNoCid(this)
 
     /** Increase the `version` if appropriate for `languageVersions`. */
     def typedBy(languageVersions: LanguageVersion*): VersionedValue[Cid] = {
@@ -316,23 +303,14 @@ object Value extends CidContainer1[Value] {
     }
 
   /** A contract instance is a value plus the template that originated it. */
-  final case class ContractInst[+Val](template: Identifier, arg: Val, agreementText: String) {
+  final case class ContractInst[+Val](template: Identifier, arg: Val, agreementText: String)
+      extends value.CidContainer[ContractInst[Val]] {
 
-    @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCid from CidContainer", since = "0.13.51")
+    override protected val self: ContractInst[Val] = this
+
+    @deprecated("use resolveRelCid/ensureNoCid/ensureNoRelCid", since = "0.13.51")
     def mapValue[Val2](f: Val => Val2): ContractInst[Val2] =
-      this.copy(arg = f(arg))
-
-    // Shortcut for ContractInst.assertNodCid(this)
-    def ensureNoCid[Val2](
-        implicit mapper: CidMapper.NoCidMapper[ContractInst[Val], ContractInst[Val2]])
-      : Either[ContractId, ContractInst[Val2]] =
-      CidContainer.ensureNoCid(this)
-
-    // Shortcut for ContractInst.resolveRelCid(f, this)
-    def resolveRelCid[Val2](f: RelativeContractId => Ref.ContractIdString)(
-        implicit mapper: CidMapper.RelCidResolverMapper[ContractInst[Val], ContractInst[Val2]],
-    ): ContractInst[Val2] =
-      CidContainer.resolveRelCid(f, this)
+      ContractInst.map1(f)(this)
 
   }
 

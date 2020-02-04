@@ -1,4 +1,7 @@
-package com.digitalasset.daml.lf.value
+package com.digitalasset.daml.lf
+package value
+
+import java.lang.Throwable
 
 import com.digitalasset.daml.lf.data.Ref
 
@@ -32,44 +35,54 @@ object CidMapper {
 
 }
 
-object CidContainer {
+trait CidContainer[+A] {
 
   import CidMapper._
 
-  def resolveRelCid[A, B](f: Value.RelativeContractId => Ref.ContractIdString, x: A)(
+  protected val self: A
+
+  def resolveRelCid[B](f: Value.RelativeContractId => Ref.ContractIdString)(
       implicit mapper: RelCidResolverMapper[A, B],
   ): B =
     mapper.map({
       case acoid: Value.AbsoluteContractId => acoid
       case rcoid: Value.RelativeContractId => Value.AbsoluteContractId(f(rcoid))
-    })(x)
+    })(self)
 
-  private case class UnexpectedCid(coid: Value.ContractId) extends Throwable with NoStackTrace
-
-  def ensureNoCid[A, B](x: A)(
+  def ensureNoCid[B](
       implicit mapper: NoCidMapper[A, B]
-  ): Either[Value.ContractId, B] =
+  ): Either[Value.ContractId, B] = {
+    case class Ball(x: Value.ContractId) extends Throwable with NoStackTrace
     try {
-      Right(mapper.map(coid => throw UnexpectedCid(coid))(x))
+      Right(mapper.map(coid => throw Ball(coid))(self))
     } catch {
-      case UnexpectedCid(coid) => Left(coid)
+      case Ball(coid) => Left(coid)
     }
+  }
 
-  private case class UnexpectedRelCid(coid: Value.RelativeContractId)
-      extends Throwable
-      with NoStackTrace
+  def assertNoCid[B](message: Value.ContractId => String)(
+      implicit mapper: NoCidMapper[A, B]
+  ): B =
+    data.assertRight(ensureNoCid.left.map(message))
 
-  def ensureNoRelCid[A, B](x: A)(
+  def ensureNoRelCid[B](
       implicit mapper: NoRelCidMapper[A, B]
-  ): Either[Value.RelativeContractId, B] =
+  ): Either[Value.RelativeContractId, B] = {
+    case class Ball(x: Value.RelativeContractId) extends Throwable with NoStackTrace
     try {
       Right(mapper.map({
         case acoid: Value.AbsoluteContractId => acoid
-        case rcoid: Value.RelativeContractId => throw UnexpectedRelCid(rcoid)
-      })(x))
+        case rcoid: Value.RelativeContractId => throw Ball(rcoid)
+      })(self))
     } catch {
-      case UnexpectedRelCid(coid) => Left(coid)
+      case Ball(coid) => Left(coid)
     }
+  }
+
+  def assertNoRelCid[B](message: Value.ContractId => String)(
+      implicit mapper: NoRelCidMapper[A, B]
+  ): B =
+    data.assertRight(ensureNoRelCid.left.map(message))
 
 }
 

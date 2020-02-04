@@ -155,12 +155,8 @@ class ActiveLedgerStateManager[ALS](initialState: => ALS)(
                     .getOrElse(nodeId, Set.empty) diff nc.stakeholders).toList
                     .map(p => p -> transactionId)
                     .toMap,
-                  key = nc.key.map(
-                    _.ensureNoCid.fold(
-                      coid =>
-                        throw new IllegalStateException(s"Contract ID $coid found in contract key"),
-                      identity,
-                    )),
+                  key =
+                    nc.key.map(_.assertNoCid(coid => s"Contract ID $coid found in contract key")),
                   signatories = nc.signatories,
                   observers = nc.stakeholders.diff(nc.signatories),
                   agreementText = nc.coinst.agreementText
